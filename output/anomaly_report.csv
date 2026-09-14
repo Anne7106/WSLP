@@ -1,0 +1,47 @@
+IP,Timestamp,Method,URL,Status,Response_Time,Reason
+10.0.0.5,2026-09-14 10:37:59,GET,/products,500,846,Server Error
+10.0.0.5,2026-09-14 10:38:29,GET,/contact,500,134,Server Error
+192.168.1.10,2026-09-14 10:39:59,POST,/about,404,96,Page Not Found
+192.168.1.11,2026-09-14 10:40:29,POST,/,500,229,Server Error
+10.0.0.5,2026-09-14 10:42:29,POST,/products,500,944,Server Error
+192.168.1.11,2026-09-14 10:44:29,GET,/home,404,880,Page Not Found
+192.168.1.12,2026-09-14 10:44:59,POST,/,500,283,Server Error
+192.168.1.12,2026-09-14 10:45:59,GET,/,200,994,High Response Time
+192.168.1.10,2026-09-14 10:46:59,POST,/products,200,925,High Response Time
+192.168.1.10,2026-09-14 10:47:29,GET,/home,200,815,High Response Time
+172.16.0.8,2026-09-14 10:48:59,GET,/contact,500,274,Server Error
+192.168.1.11,2026-09-14 10:49:59,GET,/,500,152,Server Error
+192.168.1.10,2026-09-14 10:50:29,GET,/,200,912,High Response Time
+192.168.1.11,2026-09-14 10:51:29,GET,/products,404,249,Page Not Found
+172.16.0.8,2026-09-14 10:55:29,POST,/contact,404,548,Page Not Found
+10.0.0.5,2026-09-14 10:56:29,POST,/home,201,872,High Response Time
+192.168.1.11,2026-09-14 10:56:59,POST,/about,500,650,Server Error
+192.168.1.10,2026-09-14 10:58:29,POST,/,404,556,Page Not Found
+172.16.0.8,2026-09-14 10:58:59,GET,/home,500,337,Server Error
+10.0.0.5,2026-09-14 10:59:29,GET,/home,201,808,High Response Time
+172.16.0.8,2026-09-14 10:59:59,POST,/contact,404,649,Page Not Found
+172.16.0.8,2026-09-14 11:00:29,POST,/home,404,977,Page Not Found
+10.0.0.5,2026-09-14 11:01:29,POST,/login,200,943,High Response Time
+10.0.0.5,2026-09-14 11:01:59,POST,/about,500,913,Server Error
+192.168.1.12,2026-09-14 11:04:29,POST,/login,500,483,Server Error
+192.168.1.11,2026-09-14 11:05:29,GET,/home,404,54,Page Not Found
+10.0.0.5,2026-09-14 11:06:29,GET,/home,500,800,Server Error
+172.16.0.8,2026-09-14 11:07:59,POST,/login,200,805,High Response Time
+192.168.1.12,2026-09-14 11:09:59,POST,/contact,201,955,High Response Time
+192.168.1.10,2026-09-14 11:10:29,POST,/products,500,411,Server Error
+192.168.1.12,2026-09-14 11:11:59,POST,/about,500,510,Server Error
+172.16.0.8,2026-09-14 11:12:29,GET,/contact,404,152,Page Not Found
+10.0.0.5,2026-09-14 11:12:59,POST,/login,500,827,Server Error
+192.168.1.10,2026-09-14 11:13:29,GET,/products,200,915,High Response Time
+192.168.1.10,2026-09-14 11:13:59,POST,/products,200,854,High Response Time
+192.168.1.10,2026-09-14 11:17:29,POST,/contact,200,951,High Response Time
+172.16.0.8,2026-09-14 11:18:29,POST,/contact,500,342,Server Error
+192.168.1.10,2026-09-14 11:18:59,GET,/home,200,963,High Response Time
+192.168.1.12,2026-09-14 11:19:29,GET,/about,404,552,Page Not Found
+172.16.0.8,2026-09-14 11:19:59,POST,/products,200,898,High Response Time
+10.0.0.5,2026-09-14 11:20:29,POST,/contact,500,55,Server Error
+10.0.0.5,2026-09-14 11:20:59,POST,/home,404,89,Page Not Found
+192.168.1.12,2026-09-14 11:22:59,POST,/home,200,873,High Response Time
+192.168.1.12,2026-09-14 11:23:59,POST,/contact,404,378,Page Not Found
+10.0.0.5,2026-09-14 11:24:59,GET,/home,404,703,Page Not Found
+192.168.1.10,2026-09-14 11:26:29,GET,/contact,500,603,Server Error
