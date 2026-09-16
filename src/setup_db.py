@@ -1,4 +1,3 @@
-Create src/setup_db.py:
 
 import psycopg2
 
