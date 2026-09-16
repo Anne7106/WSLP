@@ -42,7 +42,7 @@ def upload_batch(site):
     client.put_object(BUCKET, filename, data, length=len(content.encode("utf-8")))
     print(f"Uploaded {filename} ({len(lines)} lines)")
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     while True:
         for site in SITES:
             upload_batch(site)
