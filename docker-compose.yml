@@ -14,7 +14,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   minio:
-    image: minio/minio
+    image: quay.io/minio/minio
     container_name: wslp_minio
     restart: always
     environment:
