@@ -37,7 +37,7 @@ def check_new_files():
         processed_files.add(obj.object_name)
         print(f"Processed {obj.object_name} -> site: {site_id}")
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     print("Live processor started. Watching MinIO for new logs...")
     while True:
         check_new_files()
