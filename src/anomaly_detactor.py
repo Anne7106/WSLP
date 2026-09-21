@@ -1,299 +1,144 @@
-import os
-import sqlite3
-import time
+import psycopg2
+import requests
 from datetime import datetime, timedelta
 
+conn = psycopg2.connect(host="localhost", port=5432, dbname="wslp_db", user="wslp_user", password="wslp_pass")
+cur = conn.cursor()
 
-DATABASE_FILE = "data/logs.db"
+# ---- Put your Slack webhook URL here (Phase 5c explains how to get one) ----
+SLACK_WEBHOOK_URL = "PASTE_YOUR_WEBHOOK_URL_HERE"
 
-# How often the detector checks the database
-CHECK_INTERVAL_SECONDS = 5
+SUSPICIOUS_PATHS = ["/wp-admin", "/.env", "/admin", "/phpmyadmin"]
 
-# Analyze logs from the most recent 60 seconds
-WINDOW_SECONDS = 60
+def send_alert(message):
+    print(f"ALERT: {message}")
+    if SLACK_WEBHOOK_URL and "PASTE" not in SLACK_WEBHOOK_URL:
+        try:
+            requests.post(SLACK_WEBHOOK_URL, json={"text": message})
+        except Exception as e:
+            print(f"Failed to send Slack alert: {e}")
 
-# Detection thresholds
-HIGH_ERROR_COUNT = 5
-HIGH_SLOW_REQUEST_COUNT = 3
-HIGH_AVERAGE_RESPONSE_TIME = 800
-HIGH_TRAFFIC_COUNT = 45
+def log_anomaly(site_id, anomaly_type, severity, description):
+    cur.execute("""
+        INSERT INTO anomalies (site_id, detected_at, anomaly_type, severity, description)
+        VALUES (%s, %s, %s, %s, %s)
+    """, (site_id, datetime.utcnow(), anomaly_type, severity, description))
+    conn.commit()
+    send_alert(f"[{site_id}] {anomaly_type} ({severity}): {description}")
 
+def get_sites():
+    cur.execute("SELECT DISTINCT site_id FROM web_logs")
+    return [row[0] for row in cur.fetchall()]
 
-def connect_database():
-    """Open the SQLite database."""
-    if not os.path.exists(DATABASE_FILE):
-        raise FileNotFoundError(
-            f"Database not found: {DATABASE_FILE}"
-        )
+# ---------------------------------------------------------------------------
+# 1. SECURITY — Attack & Bot Detection
+# ---------------------------------------------------------------------------
+def check_security(site_id):
+    since = datetime.utcnow() - timedelta(minutes=1)
 
-    return sqlite3.connect(DATABASE_FILE)
-
-
-def create_anomaly_table(connection):
-    """Create the anomaly table if it does not already exist."""
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS anomalies (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            detected_at TEXT NOT NULL,
-            anomaly_type TEXT NOT NULL,
-            description TEXT NOT NULL,
-            metric_value REAL,
-            threshold REAL,
-            severity TEXT NOT NULL,
-            fingerprint TEXT UNIQUE
-        )
-        """
-    )
-
-    connection.commit()
-
-
-def get_recent_logs(connection):
-    """Read logs from the most recent time window."""
-    cutoff_time = datetime.now() - timedelta(
-        seconds=WINDOW_SECONDS
-    )
-
-    cutoff_text = cutoff_time.strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
-
-    cursor = connection.execute(
-        """
-        SELECT
-            ip_address,
-            timestamp,
-            http_method,
-            url,
-            status_code,
-            response_time
+    # A) Same IP hammering the site = possible bot/DDoS
+    cur.execute("""
+        SELECT ip_address, COUNT(*) as cnt
         FROM web_logs
-        WHERE timestamp >= ?
-        ORDER BY timestamp ASC
-        """,
-        (cutoff_text,),
-    )
+        WHERE site_id = %s AND timestamp > %s
+        GROUP BY ip_address
+        HAVING COUNT(*) > 20
+    """, (site_id, since))
+    for ip, cnt in cur.fetchall():
+        log_anomaly(site_id, "BOT_SUSPECTED", "HIGH",
+                    f"IP {ip} made {cnt} requests in the last minute")
+        cur.execute("""
+            INSERT INTO blocked_ips (site_id, ip_address, reason)
+            VALUES (%s, %s, %s)
+        """, (site_id, ip, f"{cnt} requests/min"))
+        conn.commit()
 
-    return cursor.fetchall()
+    # B) Requests to sensitive/scanning paths
+    cur.execute("""
+        SELECT ip_address, endpoint, COUNT(*)
+        FROM web_logs
+        WHERE site_id = %s AND timestamp > %s AND endpoint = ANY(%s)
+        GROUP BY ip_address, endpoint
+    """, (site_id, since, SUSPICIOUS_PATHS))
+    for ip, endpoint, cnt in cur.fetchall():
+        log_anomaly(site_id, "SCAN_ATTEMPT", "MEDIUM",
+                    f"IP {ip} probed suspicious path {endpoint}")
 
+# ---------------------------------------------------------------------------
+# 2. UPTIME & RELIABILITY MONITORING
+# ---------------------------------------------------------------------------
+def check_uptime(site_id):
+    since = datetime.utcnow() - timedelta(minutes=1)
+    cur.execute("""
+        SELECT
+            COUNT(*) FILTER (WHERE status_code >= 500) as errors,
+            COUNT(*) as total
+        FROM web_logs
+        WHERE site_id = %s AND timestamp > %s
+    """, (site_id, since))
+    errors, total = cur.fetchone()
+    if total == 0:
+        return
+    error_rate = (errors / total) * 100
+    if error_rate > 10:
+        log_anomaly(site_id, "HIGH_ERROR_RATE", "HIGH",
+                    f"Error rate {error_rate:.1f}% ({errors}/{total} requests) in last minute")
 
-def calculate_metrics(rows):
-    """Calculate basic metrics for the recent logs."""
-    total_requests = len(rows)
+# ---------------------------------------------------------------------------
+# 3. REAL-TIME ALERTING
+#    (already wired in — log_anomaly() above calls send_alert() every time)
+# ---------------------------------------------------------------------------
 
-    if total_requests == 0:
-        return {
-            "total_requests": 0,
-            "error_count": 0,
-            "slow_count": 0,
-            "average_response_time": 0,
-        }
+# ---------------------------------------------------------------------------
+# 4. TRAFFIC & BUSINESS INSIGHTS
+# ---------------------------------------------------------------------------
+def traffic_insights(site_id):
+    since = datetime.utcnow() - timedelta(minutes=5)
+    cur.execute("""
+        SELECT endpoint, COUNT(*) as hits
+        FROM web_logs
+        WHERE site_id = %s AND timestamp > %s
+        GROUP BY endpoint ORDER BY hits DESC LIMIT 3
+    """, (site_id, since))
+    top = cur.fetchall()
+    print(f"[{site_id}] Top endpoints (last 5 min): {top}")
 
-    error_count = 0
-    slow_count = 0
-    total_response_time = 0
+    cur.execute("""
+        SELECT COUNT(*) FROM web_logs
+        WHERE site_id = %s AND timestamp > %s AND status_code = 404
+    """, (site_id, since))
+    broken = cur.fetchone()[0]
+    if broken > 5:
+        log_anomaly(site_id, "BROKEN_LINKS", "LOW",
+                    f"{broken} 404 errors in last 5 min — check for broken links")
 
-    for row in rows:
-        status_code = int(row[4])
-        response_time = int(row[5])
+# ---------------------------------------------------------------------------
+# 5. CAPACITY PLANNING
+# ---------------------------------------------------------------------------
+def capacity_check(site_id):
+    since = datetime.utcnow() - timedelta(minutes=5)
+    cur.execute("""
+        SELECT AVG(response_time_ms), COUNT(*)
+        FROM web_logs
+        WHERE site_id = %s AND timestamp > %s
+    """, (site_id, since))
+    avg_time, volume = cur.fetchone()
+    if avg_time and volume:
+        print(f"[{site_id}] Avg response: {avg_time:.0f}ms over {volume} requests (last 5 min)")
+        if avg_time > 1000 and volume > 20:
+            log_anomaly(site_id, "CAPACITY_WARNING", "MEDIUM",
+                        f"Response time degrading ({avg_time:.0f}ms) under load ({volume} req/5min) — consider scaling")
 
-        if status_code >= 500:
-            error_count += 1
-
-        if response_time > HIGH_AVERAGE_RESPONSE_TIME:
-            slow_count += 1
-
-        total_response_time += response_time
-
-    average_response_time = (
-        total_response_time / total_requests
-    )
-
-    return {
-        "total_requests": total_requests,
-        "error_count": error_count,
-        "slow_count": slow_count,
-        "average_response_time": average_response_time,
-    }
-
-
-def save_anomaly(
-    connection,
-    anomaly_type,
-    description,
-    metric_value,
-    threshold,
-    severity,
-):
-    """Save an anomaly once per minute and anomaly type."""
-    detected_at = datetime.now()
-    minute_bucket = detected_at.strftime(
-        "%Y-%m-%d %H:%M"
-    )
-
-    fingerprint = f"{anomaly_type}:{minute_bucket}"
-
-    connection.execute(
-        """
-        INSERT OR IGNORE INTO anomalies (
-            detected_at,
-            anomaly_type,
-            description,
-            metric_value,
-            threshold,
-            severity,
-            fingerprint
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            detected_at.strftime("%Y-%m-%d %H:%M:%S"),
-            anomaly_type,
-            description,
-            metric_value,
-            threshold,
-            severity,
-            fingerprint,
-        ),
-    )
-
-    connection.commit()
-
-
-def detect_anomalies(connection, metrics):
-    """Check metrics against configured thresholds."""
-    anomalies_found = []
-
-    if metrics["error_count"] >= HIGH_ERROR_COUNT:
-        description = (
-            f"High server error count: "
-            f"{metrics['error_count']} errors in the last "
-            f"{WINDOW_SECONDS} seconds"
-        )
-
-        save_anomaly(
-            connection=connection,
-            anomaly_type="HIGH_ERROR_RATE",
-            description=description,
-            metric_value=metrics["error_count"],
-            threshold=HIGH_ERROR_COUNT,
-            severity="HIGH",
-        )
-
-        anomalies_found.append(description)
-
-    if metrics["slow_count"] >= HIGH_SLOW_REQUEST_COUNT:
-        description = (
-            f"Many slow requests: "
-            f"{metrics['slow_count']} requests exceeded "
-            f"{HIGH_AVERAGE_RESPONSE_TIME} ms"
-        )
-
-        save_anomaly(
-            connection=connection,
-            anomaly_type="SLOW_REQUESTS",
-            description=description,
-            metric_value=metrics["slow_count"],
-            threshold=HIGH_SLOW_REQUEST_COUNT,
-            severity="MEDIUM",
-        )
-
-        anomalies_found.append(description)
-
-    if (
-        metrics["average_response_time"]
-        >= HIGH_AVERAGE_RESPONSE_TIME
-    ):
-        description = (
-            f"High average response time: "
-            f"{metrics['average_response_time']:.2f} ms"
-        )
-
-        save_anomaly(
-            connection=connection,
-            anomaly_type="HIGH_AVERAGE_RESPONSE_TIME",
-            description=description,
-            metric_value=metrics["average_response_time"],
-            threshold=HIGH_AVERAGE_RESPONSE_TIME,
-            severity="MEDIUM",
-        )
-
-        anomalies_found.append(description)
-
-    if metrics["total_requests"] >= HIGH_TRAFFIC_COUNT:
-        description = (
-            f"High traffic volume: "
-            f"{metrics['total_requests']} requests in the last "
-            f"{WINDOW_SECONDS} seconds"
-        )
-
-        save_anomaly(
-            connection=connection,
-            anomaly_type="HIGH_TRAFFIC",
-            description=description,
-            metric_value=metrics["total_requests"],
-            threshold=HIGH_TRAFFIC_COUNT,
-            severity="MEDIUM",
-        )
-
-        anomalies_found.append(description)
-
-    return anomalies_found
-
-
-def run_detector_once():
-    """Run one anomaly-detection cycle."""
-    connection = connect_database()
-
-    try:
-        create_anomaly_table(connection)
-
-        rows = get_recent_logs(connection)
-        metrics = calculate_metrics(rows)
-        anomalies = detect_anomalies(connection, metrics)
-
-        print("\n===== LIVE ANOMALY DETECTION =====")
-        print(
-            "Time:",
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        )
-        print(
-            f"Requests in last {WINDOW_SECONDS} seconds:",
-            metrics["total_requests"],
-        )
-        print("Server errors:", metrics["error_count"])
-        print("Slow requests:", metrics["slow_count"])
-        print(
-            "Average response time:",
-            f"{metrics['average_response_time']:.2f} ms",
-        )
-
-        if anomalies:
-            print("\nDetected anomalies:")
-
-            for anomaly in anomalies:
-                print("-", anomaly)
-        else:
-            print("\nNo anomalies detected.")
-
-    finally:
-        connection.close()
-
-
-def main():
-    """Continuously monitor the database."""
-    print("Starting live anomaly detector...")
-    print("Press CTRL+C to stop.")
-
-    try:
-        while True:
-            run_detector_once()
-            time.sleep(CHECK_INTERVAL_SECONDS)
-
-    except KeyboardInterrupt:
-        print("\nAnomaly detector stopped.")
-
-
+# ---------------------------------------------------------------------------
+# MAIN LOOP
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    main()
+    import time
+    print("Anomaly detector running. Checking every 15 seconds...")
+    while True:
+        for site in get_sites():
+            check_security(site)
+            check_uptime(site)
+            traffic_insights(site)
+            capacity_check(site)
+        time.sleep(15)
