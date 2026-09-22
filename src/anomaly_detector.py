@@ -1,12 +1,15 @@
 import psycopg2
 import requests
+import os
 from datetime import datetime, timedelta
 
 conn = psycopg2.connect(host="localhost", port=5432, dbname="wslp_db", user="wslp_user", password="wslp_pass")
 cur = conn.cursor()
 
 # ---- Put your Slack webhook URL here (Phase 5c explains how to get one) ----
-SLACK_WEBHOOK_URL = "PASTE_YOUR_WEBHOOK_URL_HERE"
+import os
+
+WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
 SUSPICIOUS_PATHS = ["/wp-admin", "/.env", "/admin", "/phpmyadmin"]
 
