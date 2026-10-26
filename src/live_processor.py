@@ -6,7 +6,7 @@ from datetime import datetime
 client = Minio("localhost:9000", access_key="minioadmin", secret_key="minioadmin", secure=False)
 BUCKET = "weblogs"
 
-conn = psycopg2.connect(host="localhost", port=5432, dbname="wslp_db", user="wslp_user", password="wslp_pass")
+conn = psycopg2.connect(host="localhost", port=5433, dbname="wslp_db", user="wslp_user", password="wslp_pass")
 cur = conn.cursor()
 
 processed_files = set()

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WSLP Alert Control Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--chrome:#1a212b;--chrome2:#2a3441;--ctx:#aeb8c5;--bg:#e6e9ed;--panel:#f8f9fa;--line:#c5ccd5;--tx:#1d232b;--mut:#5b6573;
+--ac:#2b5d8a;--crit:#c62828;--warn:#d98200;--info:#1f64b5;--ok:#2e7d32;--sans:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",Consolas,monospace}
+@media(prefers-color-scheme:dark){:root{--bg:#10151b;--panel:#18202a;--line:#2c3644;--tx:#dfe5ec;--mut:#8d99a8;--ac:#5c97cf;--crit:#ef5350;--warn:#f0a030;--info:#5aa0ee;--ok:#5fbf65}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 var(--sans);background:var(--bg);color:var(--tx);font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.shell{display:grid;grid-template-columns:208px 1fr;min-height:100vh}
+aside{background:var(--chrome);color:var(--ctx);display:flex;flex-direction:column;padding:18px 0;position:sticky;top:0;height:100vh}
+.brand{padding:0 18px 18px;border-bottom:1px solid var(--chrome2);margin-bottom:10px}.brand b{display:block;color:#fff;font-size:16px;letter-spacing:.3px}.brand span{font-size:12px}
+nav{display:flex;flex-direction:column}nav button{background:none;border:0;border-left:3px solid transparent;padding:10px 18px;color:var(--ctx);text-align:left;cursor:pointer;font:inherit}
+nav button:hover{background:var(--chrome2);color:#fff}nav button.on{background:var(--chrome2);color:#fff;border-left-color:#6fb1ee;font-weight:600}
+.op{margin-top:auto;padding:14px 18px 0;border-top:1px solid var(--chrome2);font-size:12px}.op input{width:100%;margin-top:6px;background:var(--chrome2);border-color:#3a4757;color:#fff}
+.top{padding:10px 24px;border-bottom:1px solid var(--line);color:var(--mut);font-size:12px;background:var(--panel)}main{padding:20px 24px;max-width:1180px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:14px}
+#banner{font-size:15px;padding:14px 18px;border-left:6px solid var(--line)}#banner.bad{border-left-color:var(--crit)}#banner.good{border-left-color:var(--ok)}#banner div{margin-top:8px;font-size:14px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border:1px solid var(--line);background:var(--panel);border-radius:3px;margin:12px 0 16px}
+.kpis .card{border:0;border-right:1px solid var(--line);border-radius:0;background:none}.kpis .card:last-child{border-right:0}
+.kpi span{color:var(--mut);font-size:12px}.kpi b{display:block;font:500 28px var(--mono);margin-top:2px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:500;font-size:12px;background:var(--bg)}td:nth-child(4),td:nth-child(5){font-family:var(--mono);font-size:13px}
+.card:has(table){padding:0}.card:has(table) p{padding:0 12px}tr.s-critical td:first-child{box-shadow:inset 4px 0 var(--crit)}tr.s-warning td:first-child{box-shadow:inset 4px 0 var(--warn)}tr.s-info td:first-child{box-shadow:inset 4px 0 var(--info)}
+.pill{padding:2px 8px;border-radius:2px;font-size:12px;font-weight:600;color:#fff;margin-left:4px}.critical{background:var(--crit)}.warning{background:var(--warn)}.info{background:var(--info)}
+button.b{background:var(--ac);color:#fff;border:1px solid var(--ac);padding:6px 14px;border-radius:3px;cursor:pointer;font:inherit;font-weight:500}
+button.g{background:var(--panel);border:1px solid var(--line);color:var(--tx);padding:5px 10px;border-radius:3px;cursor:pointer;font:inherit}button.g:hover{border-color:var(--ac)}
+input,select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:3px;background:var(--panel);color:var(--tx)}
+.rule{display:grid;grid-template-columns:1fr 300px;gap:18px;margin-bottom:10px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.mut{color:var(--mut);font-size:12px}.hide{display:none}svg{width:100%;height:70px;display:block;background:var(--bg);border:1px solid var(--line)}.err{color:var(--crit)}
+.field{display:grid;grid-template-columns:240px 1fr;gap:8px;align-items:center;margin-bottom:10px}
+@media(max-width:820px){.shell{grid-template-columns:1fr}aside{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:8px}.brand{border:0;padding:0 10px;margin:0}nav{flex-direction:row}nav button{border-left:0;border-bottom:3px solid transparent;padding:8px 10px}nav button.on{border-bottom-color:#6fb1ee}.op{margin:0 0 0 auto;border:0;padding:0}.rule,.field{grid-template-columns:1fr}}
+</style></head><body>
+<div class="shell"><aside><div class="brand"><b>WSLP Monitor</b><span>Web server log alerting</span></div>
+<nav><button data-t="inc" class="on">Incidents</button><button data-t="thr">Thresholds</button><button data-t="set">Slack &amp; settings</button><button data-t="aud">Audit log</button></nav>
+<label class="op">Operator<input id="who" placeholder="your name"></label></aside>
+<div class="content"><div class="top"><span id="upd">Loading…</span></div><main>
+<section id="inc"><div id="banner" class="card"></div><div class="kpis" id="kpis" style="margin-top:12px"></div>
+<div class="row" style="margin:0 0 12px"><select id="fs"><option value="">All sites</option></select>
+<select id="fst"><option value="active">Active (open + acknowledged)</option><option value="open">Open</option><option value="acked">Acknowledged</option><option value="resolved">Resolved (history)</option><option value="all">Everything</option></select>
+<select id="fsv"><option value="">All severities</option><option>critical</option><option>warning</option><option>info</option></select></div>
+<div class="card"><table><thead><tr><th>Severity</th><th>Site</th><th>What is happening</th><th>Seen</th><th>Duration</th><th>Status</th><th></th></tr></thead><tbody id="ib"></tbody></table><p class="mut" id="ie"></p></div>
+<div id="hist" class="card hide" style="margin-top:12px"></div></section>
+<section id="thr" class="hide"><div class="row"><b>Site:</b><select id="site"></select><span class="mut">The chart shows how many alerts a threshold would have caused in the last hour <b>before</b> you save. "All sites" applies a change to every site.</span></div><div id="rules" style="margin-top:14px"></div></section>
+<section id="set" class="hide"><div class="card" style="max-width:640px">
+<div class="field"><label>Slack webhook URL</label><input id="slack_webhook" placeholder="https://hooks.slack.com/services/..."></div>
+<div class="field"><label>Send to Slack from severity</label><select id="slack_min_severity"><option value="info">info (everything)</option><option value="warning">warning and above</option><option value="critical">critical only</option></select></div>
+<div class="field"><label>Digest every (minutes)</label><input id="digest_minutes" type="number" min="1"></div>
+<div class="field"><label>Auto-resolve after quiet (minutes)</label><input id="resolve_after_min" type="number" min="1"></div>
+<div class="field"><label>Reopen same incident if it returns within (min)</label><input id="reopen_cooldown_min" type="number" min="1"></div>
+<div class="row"><button class="b" onclick="saveSet()">Save</button><button class="g" onclick="testSlack()">Send test message</button><span id="setmsg" class="mut"></span></div></div></section>
+<section id="aud" class="hide"><div class="card"><table><thead><tr><th>When</th><th>Change</th></tr></thead><tbody id="ab"></tbody></table></div></section>
+</main></div></div>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const who=()=>$("#who").value.trim()||"unknown";
+const api=(p,m="GET",b)=>fetch("/api/"+p,{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify({...b,who:who()}):undefined}).then(r=>r.json());
+const ago=d=>{const s=Math.max(0,(Date.now()-new Date(d))/1000);return s<90?Math.round(s)+"s":s<5400?Math.round(s/60)+"m":Math.round(s/3600)+"h"};
+$("#who").value=localStorage.getItem("who")||"";$("#who").onchange=()=>localStorage.setItem("who",who());
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x==b));
+ document.querySelectorAll("main section").forEach(s=>s.classList.toggle("hide",s.id!=b.dataset.t));
+ ({thr:loadRules,set:loadSet,aud:loadAudit,inc:loadInc})[b.dataset.t]()});
+["fs","fst","fsv"].forEach(i=>$("#"+i).onchange=loadInc);
+async function loadInc(){
+ const qs=new URLSearchParams({status:$("#fst").value,site:$("#fs").value,severity:$("#fsv").value});
+ const [o,list,crit]=await Promise.all([api("overview"),api("incidents?"+qs),api("incidents?status=active&severity=critical")]);
+ if($("#fs").options.length==1)o.sites.forEach(s=>$("#fs").add(new Option(s,s)));
+ const b=$("#banner");b.className="card "+(crit.length?"bad":"good");
+ b.innerHTML=crit.length?`<b style="color:var(--crit)">${crit.length} critical incident(s) need attention</b>`+crit.map(i=>`<div>${esc(i.site_id)} - ${esc(i.detail)} <span class="mut">(${i.status}, ${ago(i.first_seen)})</span>
+  ${i.status=="open"?`<button class="g" onclick="act(${i.id},'ack')">Acknowledge</button>`:""}</div>`).join(""):`<b style="color:var(--ok)">All systems normal: no critical incidents</b>`;
+ const red=o.raw?Math.round(100*(1-o.slack/o.raw)):0;
+ $("#kpis").innerHTML=[["Open incidents",o.open],["Critical open",o.critical],["Raw detections (24h)",o.raw],["Slack messages (24h)",o.slack],["Noise removed",red+"%"]].map(([k,v])=>`<div class="card kpi"><span>${k}</span><b>${v}</b></div>`).join("");
+ $("#ib").innerHTML=list.map(i=>`<tr class="s-${i.severity}" style="${i.status=="resolved"?"opacity:.55":""}"><td><span class="pill ${i.severity}">${i.severity}</span></td><td>${esc(i.site_id)}</td>
+ <td>${esc(i.detail)}<div class="mut">peak ${(+i.peak).toFixed(1)}</div></td><td>${i.hits}x</td><td>${ago(i.first_seen)}</td>
+ <td>${i.status}<div class="mut">${i.status=="acked"?"by "+esc(i.acked_by):i.status=="resolved"?"by "+esc(i.resolved_by):""}</div></td>
+ <td><button class="g" onclick="hist(${i.id})">History</button> ${i.status=="open"?`<button class="g" onclick="act(${i.id},'ack')">Acknowledge</button> `:""}${i.status!="resolved"?`<button class="g" onclick="act(${i.id},'resolve')">Resolve</button>`:""}</td></tr>`).join("");
+ $("#ie").textContent=list.length?"":"Nothing matches these filters.";$("#upd").textContent="Updated "+new Date().toLocaleTimeString()+" · refreshes every 5 seconds"}
+const act=async(i,a)=>{await api(`incidents/${i}/${a}`,"POST",{});loadInc()};
+async function hist(i){const h=await api(`incidents/${i}/history`),el=$("#hist");el.classList.remove("hide");
+ el.innerHTML=`<b>Incident #${i} - last ${h.length} detections</b> <button class="g" onclick="this.parentElement.classList.add('hide')">Close</button><div class="mut" style="margin-top:8px">`+
+ h.map(x=>`${new Date(x.ts+"Z").toLocaleTimeString()} → ${(+x.value).toFixed(1)}`).join(" &nbsp;·&nbsp; ")+"</div>"}
+let RULES=[];
+async function loadRules(){RULES=await api("rules");const sites=[...new Set(RULES.map(r=>r.site_id))],cur=$("#site").value;
+ $("#site").innerHTML=`<option value="*">All sites</option>`+sites.map(s=>`<option>${esc(s)}</option>`).join("");$("#site").value=cur||sites[0]||"*";drawRules()}
+$("#site").onchange=drawRules;
+function drawRules(){const s=$("#site").value,view=RULES.filter(r=>r.site_id==(s=="*"?RULES[0]?.site_id:s));
+ $("#rules").innerHTML=view.map(r=>`<div class="card rule" data-rule="${r.rule}"><div><b>${esc(r.label)}</b><div class="mut">Alert when above the threshold · measured over ${r.window} min · default ${r.default}</div>
+ <div class="row"><label><input type="checkbox" class="en" ${r.enabled?"checked":""}> Enabled</label>
+ <label>Threshold <input class="th" type="number" step="any" value="${r.threshold}" style="width:90px"> ${esc(r.unit)}</label>
+ <label>Severity <select class="sv">${["info","warning","critical"].map(x=>`<option ${x==r.severity?"selected":""}>${x}</option>`).join("")}</select></label>
+ <button class="b" onclick="saveRule('${r.rule}')">Save</button><button class="g" onclick="resetRule('${r.rule}')">Reset to default</button></div>
+ <div class="mut msg">${r.updated_by?`Last changed by ${esc(r.updated_by)}, ${ago(r.updated_at)} ago`:"Using defaults"}</div></div>
+ <div><svg viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="mut pv">Loading preview…</div></div></div>`).join("");
+ view.forEach(r=>preview(r.rule));
+ document.querySelectorAll(".th").forEach(i=>i.oninput=()=>{clearTimeout(i.t);i.t=setTimeout(()=>preview(i.closest(".rule").dataset.rule),300)})}
+async function preview(rule){const el=document.querySelector(`[data-rule=${rule}]`),site=$("#site").value=="*"?RULES[0].site_id:$("#site").value,t=+el.querySelector(".th").value;
+ const d=await api(`backtest?site=${encodeURIComponent(site)}&rule=${rule}&threshold=${t}`);
+ const v=d.points.map(p=>p[1]),mx=Math.max(t,...v,1)*1.1,y=x=>68-x/mx*66,w=d.points.length>1?300/(d.points.length-1):300;
+ el.querySelector("svg").innerHTML=`<polyline fill="none" stroke="var(--ac)" stroke-width="1.5" points="${v.map((x,i)=>`${i*w},${y(x)}`).join(" ")}"/><line x1="0" x2="300" y1="${y(t)}" y2="${y(t)}" stroke="var(--crit)" stroke-dasharray="4"/>`;
+ el.querySelector(".pv").textContent=d.total?`Last hour: would alert in ${d.breaches} of ${d.total} windows`:"No data in the last hour"}
+async function saveRule(rule){const el=document.querySelector(`[data-rule=${rule}]`),m=el.querySelector(".msg");
+ const r=await api("rules","POST",{site_id:$("#site").value,rule,enabled:el.querySelector(".en").checked,threshold:el.querySelector(".th").value,severity:el.querySelector(".sv").value});
+ m.className="mut msg"+(r.error?" err":"");if(r.error){m.textContent=r.error;return}
+ RULES=await api("rules");m.textContent="Saved - the detector applies it within 15 seconds"}
+async function resetRule(rule){if(!confirm("Reset this rule to its default?"))return;await api("rules/reset","POST",{site_id:$("#site").value,rule});RULES=await api("rules");drawRules()}
+async function loadSet(){const c=await api("settings");for(const k in c)$("#"+k).value=c[k]}
+async function saveSet(){const b={};["slack_webhook","slack_min_severity","digest_minutes","resolve_after_min","reopen_cooldown_min"].forEach(k=>b[k]=$("#"+k).value);
+ const r=await api("settings","POST",b);$("#setmsg").textContent=r.error||"Saved"}
+async function testSlack(){const r=await api("test-slack","POST",{});$("#setmsg").textContent=r.ok?"Test message sent ✔":"Failed: "+(r.error||r.status)}
+async function loadAudit(){const a=await api("audit");$("#ab").innerHTML=a.map(x=>`<tr><td>${new Date(x.ts).toLocaleString()}</td><td>${esc(x.change)}</td></tr>`).join("")}
+loadInc();setInterval(()=>{if(!$("#inc").classList.contains("hide"))loadInc()},5000);
+</script></body></html>

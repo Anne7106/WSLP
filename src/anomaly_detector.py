@@ -1,147 +1,82 @@
-import psycopg2
+import os
+import time
 import requests
-import os
 from datetime import datetime, timedelta
+from core import db, init_db, settings, metric, RULES, SEV
 
-conn = psycopg2.connect(host="localhost", port=5432, dbname="wslp_db", user="wslp_user", password="wslp_pass")
-cur = conn.cursor()
+ICON = {"critical": "🔴", "warning": "🟠", "info": "🔵"}
 
-# ---- Put your Slack webhook URL here (Phase 5c explains how to get one) ----
-import os
-
-WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
-
-SUSPICIOUS_PATHS = ["/wp-admin", "/.env", "/admin", "/phpmyadmin"]
-
-def send_alert(message):
-    print(f"ALERT: {message}")
-    if SLACK_WEBHOOK_URL and "PASTE" not in SLACK_WEBHOOK_URL:
+def slack(cfg, text):
+    print("SLACK:", text)
+    url = cfg.get("slack_webhook") or os.getenv("SLACK_WEBHOOK_URL", "")
+    if url:
         try:
-            requests.post(SLACK_WEBHOOK_URL, json={"text": message})
+            requests.post(url, json={"text": text}, timeout=5)
         except Exception as e:
-            print(f"Failed to send Slack alert: {e}")
+            print("Slack failed:", e)
 
-def log_anomaly(site_id, anomaly_type, severity, description):
-    cur.execute("""
-        INSERT INTO anomalies (site_id, detected_at, anomaly_type, severity, description)
-        VALUES (%s, %s, %s, %s, %s)
-    """, (site_id, datetime.utcnow(), anomaly_type, severity, description))
-    conn.commit()
-    send_alert(f"[{site_id}] {anomaly_type} ({severity}): {description}")
-
-def get_sites():
-    cur.execute("SELECT DISTINCT site_id FROM web_logs")
-    return [row[0] for row in cur.fetchall()]
-
-# ---------------------------------------------------------------------------
-# 1. SECURITY — Attack & Bot Detection
-# ---------------------------------------------------------------------------
-def check_security(site_id):
-    since = datetime.utcnow() - timedelta(minutes=1)
-
-    # A) Same IP hammering the site = possible bot/DDoS
-    cur.execute("""
-        SELECT ip_address, COUNT(*) as cnt
-        FROM web_logs
-        WHERE site_id = %s AND timestamp > %s
-        GROUP BY ip_address
-        HAVING COUNT(*) > 20
-    """, (site_id, since))
-    for ip, cnt in cur.fetchall():
-        log_anomaly(site_id, "BOT_SUSPECTED", "HIGH",
-                    f"IP {ip} made {cnt} requests in the last minute")
-        cur.execute("""
-            INSERT INTO blocked_ips (site_id, ip_address, reason)
-            VALUES (%s, %s, %s)
-        """, (site_id, ip, f"{cnt} requests/min"))
-        conn.commit()
-
-    # B) Requests to sensitive/scanning paths
-    cur.execute("""
-        SELECT ip_address, endpoint, COUNT(*)
-        FROM web_logs
-        WHERE site_id = %s AND timestamp > %s AND endpoint = ANY(%s)
-        GROUP BY ip_address, endpoint
-    """, (site_id, since, SUSPICIOUS_PATHS))
-    for ip, endpoint, cnt in cur.fetchall():
-        log_anomaly(site_id, "SCAN_ATTEMPT", "MEDIUM",
-                    f"IP {ip} probed suspicious path {endpoint}")
-
-# ---------------------------------------------------------------------------
-# 2. UPTIME & RELIABILITY MONITORING
-# ---------------------------------------------------------------------------
-def check_uptime(site_id):
-    since = datetime.utcnow() - timedelta(minutes=1)
-    cur.execute("""
-        SELECT
-            COUNT(*) FILTER (WHERE status_code >= 500) as errors,
-            COUNT(*) as total
-        FROM web_logs
-        WHERE site_id = %s AND timestamp > %s
-    """, (site_id, since))
-    errors, total = cur.fetchone()
-    if total == 0:
+def cycle(cur, only_site=None):
+    init_db(cur)
+    cfg, now = settings(cur), datetime.utcnow()      # thresholds re-read every cycle -> UI edits apply live
+    min_sev = SEV[cfg["slack_min_severity"]]
+    cur.execute("UPDATE incidents SET status='resolved',resolved_by='system',resolved_at=%s WHERE status<>'resolved' "
+                "AND (site_id,rule) IN (SELECT site_id,rule FROM alert_rules WHERE NOT enabled)", (now,))
+    cur.execute("SELECT site_id,rule,threshold,severity FROM alert_rules WHERE enabled "
+                "AND (%s::text IS NULL OR site_id=%s)", (only_site, only_site))
+    for site, rule, thr, sev in cur.fetchall():
+        val = metric(cur, site, rule)
+        label, unit = RULES[rule][:2]
+        cur.execute("SELECT id,notified_sev,last_seen,status FROM incidents WHERE site_id=%s AND rule=%s "
+                    "AND status IN ('open','acked')", (site, rule))
+        inc = cur.fetchone()
+        if val > thr:
+            detail = f"{label}: {val:.1f} {unit} (limit {thr:g})"
+            if not inc:
+                # a flapping problem that auto-resolved moments ago reopens the SAME incident, silently
+                cur.execute("UPDATE incidents SET status='open',resolved_at=NULL,resolved_by=NULL WHERE id=("
+                            "SELECT id FROM incidents WHERE site_id=%s AND rule=%s AND status='resolved' "
+                            "AND resolved_by='system' AND resolved_at>%s ORDER BY id DESC LIMIT 1) "
+                            "RETURNING id,notified_sev,last_seen,status",
+                            (site, rule, now - timedelta(minutes=float(cfg["reopen_cooldown_min"]))))
+                inc = cur.fetchone()
+            if inc:
+                iid, was = inc[0], inc[1]
+                cur.execute("UPDATE incidents SET hits=hits+1,last_seen=%s,peak=GREATEST(peak,%s),detail=%s,severity=%s "
+                            "WHERE id=%s", (now, val, detail, sev, iid))
+            else:
+                cur.execute("INSERT INTO incidents(site_id,rule,severity,first_seen,last_seen,peak,detail) "
+                            "VALUES(%s,%s,%s,%s,%s,%s,%s) RETURNING id", (site, rule, sev, now, now, val, detail))
+                iid, was = cur.fetchone()[0], None
+            cur.execute("INSERT INTO detections(incident_id,ts,value) VALUES(%s,%s,%s)", (iid, now, val))
+            # alert on first open, or when severity rises above what Slack was last told (also un-acks it)
+            if SEV[sev] >= min_sev and (was is None or SEV[sev] > SEV[was]):
+                head = "ALERT" if was is None else f"ESCALATED to {sev.upper()}"
+                slack(cfg, f"{ICON[sev]} *[{site}] {head}* - {detail}")
+                cur.execute("UPDATE incidents SET notified=TRUE,notified_sev=%s,status='open' WHERE id=%s", (sev, iid))
+            # note: acknowledging does NOT silence detection - it keeps updating, it just stops repeat messages
+        elif inc and now - inc[2] > timedelta(minutes=float(cfg["resolve_after_min"])):
+            cur.execute("UPDATE incidents SET status='resolved',resolved_by='system',resolved_at=%s WHERE id=%s", (now, inc[0]))
+            if inc[1]:
+                slack(cfg, f"✅ *[{site}]* {label} is back to normal")
+    if only_site:
         return
-    error_rate = (errors / total) * 100
-    if error_rate > 10:
-        log_anomaly(site_id, "HIGH_ERROR_RATE", "HIGH",
-                    f"Error rate {error_rate:.1f}% ({errors}/{total} requests) in last minute")
+    last = cfg.get("last_digest")
+    if not last or now - datetime.fromisoformat(last) >= timedelta(minutes=float(cfg["digest_minutes"])):
+        cur.execute("SELECT site_id,severity,detail,hits FROM incidents WHERE status<>'resolved'")
+        rows = sorted(cur.fetchall(), key=lambda r: -SEV[r[1]])
+        if rows:
+            lines = [f"{ICON[s]} [{site}] {d} - seen {h}x" for site, s, d, h in rows]
+            slack(cfg, f"📋 *Digest: {len(rows)} open incident(s)*\n" + "\n".join(lines))
+        cur.execute("UPDATE app_settings SET value=%s WHERE key='last_digest'", (now.isoformat(),))
+        cur.execute("DELETE FROM detections WHERE ts<%s", (now - timedelta(days=7),))   # keep 7 days of history
 
-# ---------------------------------------------------------------------------
-# 3. REAL-TIME ALERTING
-#    (already wired in — log_anomaly() above calls send_alert() every time)
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# 4. TRAFFIC & BUSINESS INSIGHTS
-# ---------------------------------------------------------------------------
-def traffic_insights(site_id):
-    since = datetime.utcnow() - timedelta(minutes=5)
-    cur.execute("""
-        SELECT endpoint, COUNT(*) as hits
-        FROM web_logs
-        WHERE site_id = %s AND timestamp > %s
-        GROUP BY endpoint ORDER BY hits DESC LIMIT 3
-    """, (site_id, since))
-    top = cur.fetchall()
-    print(f"[{site_id}] Top endpoints (last 5 min): {top}")
-
-    cur.execute("""
-        SELECT COUNT(*) FROM web_logs
-        WHERE site_id = %s AND timestamp > %s AND status_code = 404
-    """, (site_id, since))
-    broken = cur.fetchone()[0]
-    if broken > 5:
-        log_anomaly(site_id, "BROKEN_LINKS", "LOW",
-                    f"{broken} 404 errors in last 5 min — check for broken links")
-
-# ---------------------------------------------------------------------------
-# 5. CAPACITY PLANNING
-# ---------------------------------------------------------------------------
-def capacity_check(site_id):
-    since = datetime.utcnow() - timedelta(minutes=5)
-    cur.execute("""
-        SELECT AVG(response_time_ms), COUNT(*)
-        FROM web_logs
-        WHERE site_id = %s AND timestamp > %s
-    """, (site_id, since))
-    avg_time, volume = cur.fetchone()
-    if avg_time and volume:
-        print(f"[{site_id}] Avg response: {avg_time:.0f}ms over {volume} requests (last 5 min)")
-        if avg_time > 1000 and volume > 20:
-            log_anomaly(site_id, "CAPACITY_WARNING", "MEDIUM",
-                        f"Response time degrading ({avg_time:.0f}ms) under load ({volume} req/5min) — consider scaling")
-
-# ---------------------------------------------------------------------------
-# MAIN LOOP
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    import time
-    print("Anomaly detector running. Checking every 15 seconds...")
+    print("Detector running (reads thresholds from the database every 15s)...")
     while True:
-        for site in get_sites():
-            check_security(site)
-            check_uptime(site)
-            traffic_insights(site)
-            capacity_check(site)
+        try:
+            conn = db()
+            cycle(conn.cursor())
+            conn.close()
+        except Exception as e:
+            print("Cycle error:", e)
         time.sleep(15)
